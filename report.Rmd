@@ -11,10 +11,19 @@ output:
 ---
 
 ```{r setup, include=FALSE}
+if (!require(tidyverse)) install.packages('tidyverse')
 library(tidyverse)
+if (!require(caret)) install.packages('caret')
 library(caret)
+if (!require(corrplot)) install.packages('corrplot')
 library(corrplot)
+if (!require(gridExtra)) install.packages('gridExtra')
 library(gridExtra)
+if (!require(knitr)) install.packages('knitr')
+library(knitr)
+if (!require(lubridate)) install.packages('lubridate')
+library(lubridate)
+
 load(file = "Environment.rdata")
 
 data <- read.csv("Solar-Dataset.csv")
@@ -46,7 +55,7 @@ Main task is to predict generated power better than use of average from previous
   \item  $\hat{x}_i$ ... predicted value
 \end{description}
 
-RMSE when using average is `r Results %>% filter(Method == "Average" & Cycle == 0) %>% .$RMSE` and this precision should be beaten by trained model.
+RMSE when using average is `r format(Results %>% filter(Method == "Average" & Cycle == 0) %>% .$RMSE, scientific = FALSE)` and this precision should be beaten by trained model.
 
 \clearpage
 
@@ -236,7 +245,6 @@ This algorithm should allow cross-validation of all models and should provide go
 table <- Results %>% select(-fit_index) %>% filter(Cycle != 0) %>% spread(Cycle, RMSE)
 avg <- rowMeans(table[,2:6])
 table <- table %>% mutate(Average = avg) %>% arrange(Average)
-library(knitr)
 kable(table, caption = "RMSE for each cycle and average RMSE for all cycles.")
 ```
 
@@ -293,7 +301,6 @@ table_four_variables <- data.frame(Method = c("rf","ctree2","brnn","rpart","ppr"
                                    "4" = c(4343.939,4567.309,4353.803,4554.839,4564.463,4679.778,4709.248,5030.247,5743.306,5805.526,5806.041,5806.927,11346.733),
                                    "5" = c(3838.085,3939.628,4009.452,4130.811,4244.460,4607.509,4509.195,4763.702,5968.089,5642.619,5643.528,5645.999,10771.546),
                                    Average = c(4367.591,4492.992,4555.375,4607.817,4626.199,4907.586,4930.481,5308.602,5939.400,5998.153,5998.255,5998.541,11043.999))
-library(knitr)
 kable(table_four_variables, caption = "RMSE for each cycle and average RMSE for all cycles for top 4 most important variables")
 ```
 
@@ -310,7 +317,6 @@ Final $RMSE = `r round(RMSE, 2)`$ is much better in compare to situation when on
 
 Here is plot of actual values and predicted values
 ```{r compare_result, echo=FALSE, message = FALSE, warning = FALSE, fig.cap = "Comparision of two months of real and predicted values.", out.width = "100%", fig.pos='H', fig.align='center'}
-library(lubridate)
 validation %>% mutate(Predicted.Power.Generation = y_hat) %>%
   mutate(date = make_date(Year, Month, Day)) %>% 
   filter(Year == 2009 & Month %in% c(4,5)) %>% 
@@ -338,18 +344,17 @@ Number of predictors did not play big role in this case as number of observation
 
 More data from more years could provide better or worse predictions, that would require more research and more data.
 
-Second best method was neural network with one internal layer with $\pm 8$ neurons. This is good result and number of neurons is expected as more neurons could lead to nonconverging training of the network
+Second best method was Bayesian Regularized Neural Networks (brnn) what is basically neural network with one internal layer with $\pm 8$ neurons. This is good result and number of neurons is expected as more neurons could lead to nonconverging training of the network
 
 Best method is Random Forest, which seems to be good choice for this kind of task, however requires significantly longer time for training.
 
-It would be interesting to compare these two methods on larger set of data. It is possible that neural netowork could be better than random forest.
+It would be interesting to compare these two methods on larger set of data. It is possible that neural network could be better than random forest.
 
-Other models may perform well too, here is comparision of 5 best performing models on training data when run on validation data:
+Other models may perform well too, here is comparison of 5 best performing models on training data when run on validation data:
 
 ```{r table_RMSE_best_models, echo=FALSE}
 table_top_models <- data.frame(Method = c("rpart", "rf", "ctree2", "ppr", "brnn"),
                                    "RMSE" = c(3265.290, 2850.955, 3396.210, 3620.026, 2946.773  ))
 table_top_models <- table_top_models %>% arrange(RMSE)
-library(knitr)
 kable(table_top_models, caption = "RMSE for 5 best performing models when run on validation data.")
 ```

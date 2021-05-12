@@ -1,6 +1,23 @@
+if (!require(tidyverse)) install.packages('tidyverse')
 library(tidyverse)
+if (!require(caret)) install.packages('caret')
 library(caret)
 
+
+################################################################################
+#  Solar power generation prediction                                           #
+#  --------------------------------------------------------------------------  #
+#  ing. Wojciech Pribula, 2021, wojtek.pribula.cz                              #
+#  CONTENT:                                                                    #
+#           1. LOAD DATA, SEPARATION and PREPROCESSING                         #
+#           2. FUNCTION FOR TRAINING MODELS - train for all methods            #
+#           3. MAIN FUNCTION FOR PROCESSING ALL                                #
+#               a) Train all methods on triain data                            #
+#               b) Validate methods and pick the best one                      #
+#               c) Train best method on all train data                         #
+#               d) Validate on validation data                                 #
+#                                                                              #
+################################################################################
 
 ################################################################################
 #                                                                              #
@@ -321,7 +338,7 @@ RMSE_avg <- Results %>% group_by(Method) %>% summarise(RMSE_AVG = mean(RMSE))
 # Extract methods ordered by RMSE
 methods_ordered <- RMSE_avg %>% arrange(RMSE_AVG) %>% .$Method
 # Extract best methods and adjust use_methods list
-use_methods <- methods_ordered[6]
+use_methods <- methods_ordered[1]
 
 #-------------------------------------------------------------------------------
 #                          >>> RUN FULL TRAINING <<<
