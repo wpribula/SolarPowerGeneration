@@ -26,8 +26,10 @@ library(caret)
 # data source: https://www.kaggle.com/vipulgote4/solar-power-generation        #
 #                                                                              #
 ################################################################################
-# Load data from CSF file
-data <- read.csv("Solar-Dataset.csv")
+# Load data from CSV file
+data_url <- "https://raw.githubusercontent.com/wpribula/SolarPowerGeneration/master/Solar-Dataset.csv"
+data <- read.csv(url(data_url)) #from github
+# data <- read.csv("Solar-Dataset.csv") #from file
 # Checking is daylight average
 mean(data$Power.Generated[data$Is.Daylight==FALSE])
 sd(data$Power.Generated[data$Is.Daylight==FALSE])
