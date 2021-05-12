@@ -1,0 +1,355 @@
+---
+title: "Report - Prediction Solar Power Generation"
+author: "ing. Wojciech Pribula"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document:
+    number_sections: true
+    extra_dependencies: ["float"]
+    toc: yes
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(caret)
+library(corrplot)
+library(gridExtra)
+load(file = "Environment.rdata")
+
+data <- read.csv("Solar-Dataset.csv")
+```
+
+\clearpage
+
+# Introduction
+Data set used in this project contains data from SOlar power generation facility in Berkeley, CA. Source of these data is: https://www.kaggle.com/vipulgote4/solar-power-generation.
+
+Data set contains some weather and environment measurements as temperature, wind speed and direction or visibility. Variable of interest is generated power, which should be predicted based on other variables.
+
+Data set contains `r nrow(data)` observations from September 2008 to May 2009. Each observation contain day or period averages of measured values.
+
+The data set needs to be divided into training (80%) and validation (20%) sets and validation set should not take part in training to allow validation of trained models.
+
+## Data structure
+```{r data, echo=FALSE}
+str(data)
+```
+
+## Main objective
+Main task is to predict generated power better than use of average from previous records. To compare results RMSE (Root-mean-square deviation) can be used:
+
+\[RMSE = sqrt(\frac{\sum_{i=1}^{N}(x_i-\hat{x}_i)^2}{N})\]
+\begin{description}
+  \item  $N$ ... number of observations \\
+  \item  $x_i$ ... original value \\
+  \item  $\hat{x}_i$ ... predicted value
+\end{description}
+
+RMSE when using average is `r Results %>% filter(Method == "Average" & Cycle == 0) %>% .$RMSE` and this precision should be beaten by trained model.
+
+\clearpage
+
+# Data analysis
+Data should be analyzed first to provide some basic idea about relationships of predictors to each other and to predicted value.
+
+## Night
+Firs what can be noticed is that data set contains information if it is day or not ($Is.Daylight$). Both average and standard deviation of $Power.Generated$ is $0$ when filtered for $Is.Daylight = FALSE$. This is expected as there is not sunlight at night so solar power station can't generate power. Following this all night data can be filtered out from the data set as prediction for this is always $0$.
+
+Filtered data set than has `r nrow(data[data$Is.Daylight,])`
+
+## Corelation
+What should be examined next is correlation between data.
+```{r correlation, echo=FALSE, fig.cap = "Correlation between variables.", fig.align='center', out.width = "100%", fig.pos='H'}
+# Filter data
+data <- data[data$Is.Daylight,]
+data <- data %>% select(-Day, -Is.Daylight)
+data[is.na(data)] <- 0
+#correlation
+correlation_matrix <- cor(data)
+corrplot(correlation_matrix, type = "upper", tl.col = "black", method = "square", cl.ratio = 0.3, tl.cex = 0.75, tl.srt = 45)
+```
+What can be observed is that there is very strong negative correlation between generated power and Distance to solar noon, Relative humidity and Sky cover, so it is expected that these three variables should have strong influence on prediction. However as Sky cover and Relative humidity are positively correlated, only two of these may by main influencers. 
+Visibility has positive correlation with with power generation, however it can be observed that it is practically opposite of Sky cover.
+What may surprise is that there is positive correlation for power generation and wind direction and speed, this can be explained by wind influence on weather. Wind has positive correlation with temperature. What can be deducted is that faster wind from specific direction moves could away and does not bring new clouds.
+
+## Closer examination of some variables
+Negatively correlated variables: Distance to solar noon and Relative humidity. Relationship is not that clear from point data, however smooth line shows that some relationship exists and it should be very strong.
+```{r plot_humidity_distance, echo=FALSE, warning=FALSE, message=FALSE, fig.cap = "Genrated power and distance to the solar noon and humidity.", fig.align='center', out.width = "65%", fig.pos='H'}
+Distance <- data %>% ggplot(aes(Distance.to.Solar.Noon, Power.Generated)) + 
+  geom_point(color = "darkorange") + 
+  geom_smooth(color = "darkred") +
+  ggtitle("Genaretd power in relation to Distance to solar noon.")
+Humidity <- data %>% ggplot(aes(Relative.Humidity, Power.Generated)) + 
+  geom_point(color = "navyblue") + 
+  geom_smooth(color = "darkblue") +
+  ggtitle("Genaretd power in relation to Humidity.")
+grid.arrange(Distance, Humidity, ncol = 1)
+```
+
+It can be seen from following plots that Sky coverage and visibility have negative correlation to each other and that some relation to power generation exists. Sky coverage seems to have strong relation to generated power what is logical as more clouds means less sunlight so less power generated.
+```{r plot_sky_visibility, warning=FALSE, message=FALSE, echo=FALSE, fig.cap = "Genrated power and Sky coverage and visibility.", fig.align='center', out.width = "70%", fig.pos='H'}
+Sky <- data %>% ggplot(aes(Sky.Cover, Power.Generated, group = Sky.Cover)) + 
+  geom_boxplot(color = "dodgerblue1") + 
+  ggtitle("Genaretd power in relation to Sky coverage.")
+Visibility <- data %>% ggplot(aes(Visibility, Power.Generated)) + 
+  geom_point(color = "deepskyblue1") + 
+  geom_smooth(color = "deepskyblue3") +
+  ggtitle("Genaretd power in relation to Visibility")
+Sky_Cisibility <- data %>% ggplot(aes(Visibility, Sky.Cover)) + 
+  geom_point(color = "slateblue1") + 
+  geom_smooth(color = "slateblue3") +
+  ggtitle("Sky covergae in relation to Visibility")
+grid.arrange(Sky, Visibility, Sky_Cisibility, ncol = 1)
+```
+
+Wind speed, wind angle and temperature should have some influence on predicted generated power. This can be examined from following plots. What can be observed on points is that these relations are not strong. It can be seen that some relations to generated power exists, however these won't be strong predictors due to big spread of individual observations.
+Relationship between angle and temperature is clearly visible too.
+```{r plot_wind_temp, echo=FALSE, warning=FALSE, message=FALSE, fig.cap = "Genrated power realtion to wind speed, wind angle and temperature.", fig.align='center', out.width = "80%", fig.pos='H'}
+Wind_dir_day <- data %>% ggplot(aes(Average.Wind.Direction..Day., Power.Generated)) + 
+  geom_point(color = "springgreen1") + 
+  geom_smooth(color = "springgreen3") +
+  xlab("Avg. Wind Direction (Day)") + 
+  ylab("Genrated Power") + 
+  ggtitle("Power by Wind Direction")
+Wind_speed_day <- data %>% ggplot(aes(Average.Wind.Speed..Day., Power.Generated)) + 
+  geom_point(color = "darkolivegreen3") + 
+  geom_smooth(color = "darkolivegreen4") +
+  xlab("Avg. Wind Speed (Day)") + 
+  ylab("Genrated Power") + 
+  ggtitle("Power by Wind Speed (Day)")
+Wind_speed_period <- data %>% ggplot(aes(Average.Wind.Speed..Period., Power.Generated)) + 
+  geom_point(color = "olivedrab3") + 
+  geom_smooth(color = "olivedrab4") +
+  xlab("Avg. Wind Speed (Period)") + 
+  ylab("Genrated Power") + 
+  ggtitle("Power by Wind Speed (Period)")
+temperature <- data %>% ggplot(aes(Average.Temperature..Day., Power.Generated)) + 
+  geom_point(color = "orangered1") + 
+  geom_smooth(color = "orangered3") +
+  xlab("Avg.Temperature (Day)") + 
+  ylab("Genrated Power") + 
+  ggtitle("Power by Temperature (Day)")
+Wind_dir_temp <- data %>% ggplot(aes(Average.Wind.Direction..Day., Average.Temperature..Day.)) + 
+  geom_point(color = "orchid2") + 
+  geom_smooth(color = "orchid4") +
+  xlab("Avg. Wind Direction (Day)") + 
+  ylab("Avg. Temp. (Day)") + 
+  ggtitle("Temperature by Wind Direction")
+Wind_angle_temp <- data %>% ggplot(aes(Average.Wind.Speed..Day., Average.Temperature..Day.)) + 
+  geom_point(color = "darkorchid2") + 
+  geom_smooth(color = "darkorchid4") +
+  xlab("Avg. Wind Speed (Day)") + 
+  ylab("Avg. Temp. (Day)") + 
+  ggtitle("Temperature by Wind Speed")
+grid.arrange(Wind_dir_day, Wind_speed_day, Wind_speed_period, temperature, Wind_angle_temp, Wind_dir_temp, ncol = 2)
+```
+To make weather analysis full barometric pressure should be examined too. Relation is not very clear, however it may help a little with prediction.
+```{r pressure, echo=FALSE, warning=FALSE, message=FALSE, fig.cap = "Power by Brometric pressure in period.", fig.align='center', out.width = "70%", fig.pos='H'}
+data %>% ggplot(aes(Average.Barometric.Pressure..Period., Power.Generated)) + 
+  geom_point(color = "gold2") + 
+  geom_smooth(color = "gold4") +
+  xlab("Avg. Barometric Pressure in Period") + 
+  ylab("Genrated Power") + 
+  ggtitle("Power by Barometric pressure in Period")
+```
+
+The last area which needs to be examined is influence of time. Weather works in year cycles so it can be expected that day of the year and month should have influence on generated power. Day of the year and month are highly correlated and may be unnecessary to include both of them.
+```{r plot_time, echo=FALSE, warning=FALSE, message=FALSE, fig.cap = "Genrated power in time.", fig.align='center', out.width = "80%", fig.pos='H'}
+year <- data %>% ggplot(aes(Year, Power.Generated, group = Year, fill = factor(Year))) + 
+  geom_boxplot() +
+  ylab("Genrated Power") + 
+  ggtitle("Power by year")
+month <- data %>% ggplot(aes(Month, Power.Generated)) + 
+  geom_point(color = "blue2") + 
+  geom_smooth(color = "blue4") +
+  xlab("Month of the year") + 
+  ylab("Genrated Power") + 
+  ggtitle("Power by month of the year")
+day <- data %>% ggplot(aes(Day.of.Year, Power.Generated)) + 
+  geom_point(color = "royalblue2") + 
+  geom_smooth(color = "royalblue4") +
+  xlab("Day of the year") + 
+  ylab("Genrated Power") + 
+  ggtitle("Power by day of the year")
+hour <- data %>% ggplot(aes(First.Hour.of.Period, Power.Generated)) + 
+  geom_point(color = "steelblue2") + 
+  geom_smooth(color = "steelblue2") +
+  xlab("First hour of period") + 
+  ylab("Genrated Power") + 
+  ggtitle("Power by First hour of period")
+grid.arrange(year, month, day, hour, ncol = 2)
+```
+## Summarise of data analysis
+It seems that each parameter has some influence on generated power however it is not always very straight as spread of values is wide (visible when examining point plots). It seems that it would be necessary include most of variables to do prediction of generated power with smaller error. 
+Most variables are depended on each other in some degree, however that dependency is mostly complicated so all parameters should be used for training.
+There is few straight dependencies between variables, however even these seems to be influence in some degree by other factors.
+It can be said that all measured values have sense and were well chosen for this data set to allow prediction of generated power.
+
+\clearpage
+
+# Method for finding best prediction model
+There are many methods how to train model, however it is not obvious which one should be the best. Here is list of possible methods:
+
+\vspace{20px}
+
+\begin{description}
+  \item [knn] - k-Nearest Neighbors
+  \item [glm] - Generalized Linear Model
+  \item [treebag] - Bagged CART (Classification And Regression Tree)
+  \item [ctree2] - Conditional Inference Tree
+  \item [rf] - Random Forest
+  \item [rpart] - CART - Classification And Regression Tree
+  \item [rpart2] - CART - Classification And Regression Tree
+  \item [bridge] - Bayesian Ridge Regression
+  \item [ppr] - Projection Pursuit Regression
+  \item [gaussprLinear] - Gaussian Process
+  \item [gamSpline] - Generalized Additive Model using Splines
+  \item [brnn] - Bayesian Regularized Neural Networks
+\end{description}
+
+\vspace{40px}
+
+\textbf{Then algorithm for whole process can look like this:}
+\begin{enumerate}
+\item Load data and divide to training data (80%) and validation data (20%).
+\item Remove night rows.
+\item Use train data to train all models 5 times.
+  \begin{enumerate}
+  \item Divide training data to training data set (80%) and test data set (20%).
+  \item Train all models and calculate RMSE using test data set.
+  \end{enumerate}
+\item Calculate mean RMSE for each method.
+\item Find the best performing method.
+\item Use original training data to train best performing method.
+\item Validate on validation data and calculate RMSE
+\end{enumerate}
+
+\vspace{20px}
+
+This algorithm should allow cross-validation of all models and should provide good prediction on averall models performance on this data set.
+
+\clearpage
+
+\textbf{Here are results for all methods:}
+```{r table_RMSE, echo=FALSE}
+table <- Results %>% select(-fit_index) %>% filter(Cycle != 0) %>% spread(Cycle, RMSE)
+avg <- rowMeans(table[,2:6])
+table <- table %>% mutate(Average = avg) %>% arrange(Average)
+library(knitr)
+kable(table, caption = "RMSE for each cycle and average RMSE for all cycles.")
+```
+
+The best performing method seems to be Random Forrest followed by Neural network with one internal layer of neurons.
+\textbf{This can be confirmed in following plot too:}
+```{r plot_RMSE, echo=FALSE, fig.cap = "RMSE by Method in 5 training and tetsing cycles.", fig.align='center', out.width = "80%", fig.pos='H'}
+Results %>% filter(Cycle != 0) %>% 
+  ggplot(aes(reorder(Method, RMSE, FUN = mean), RMSE, group=Method, fill=Method)) + 
+  geom_boxplot() + 
+  ylab("RMSE") + 
+  xlab("Method") + 
+  ggtitle("RMSE by Method in 5 training and tetsing cycles") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+\clearpage
+
+## Issues with some methods
+Some methods as KNN work better with standardized data (centered around average value and divided by standard deviation). However these methods do not perform better than winning methods even if standardized data are used. So this does not need to be taken in count as winning method wins in both cases, with standardized and original data.
+
+Some methods allow some tuning parameters. Ranges for these were configured during algorithm testing and development to cover ranges which allow good tuning for this data.
+
+## Importance of variables
+```{r important_variable, echo=FALSE, fig.cap = "Importance of variables.", out.width = "100%", fig.align='center', fig.pos='H'}
+# replace Inf with ma value
+tmp <- importance$Overall
+tmp[which(is.infinite(importance$Overall))] <- 0
+tmp[which(is.infinite(importance$Overall))] <- max(tmp)
+# Summarize importance
+imp <- importance %>% mutate(Overall = tmp) %>% 
+  mutate(Variable = str_extract(row.names(importance),"[A-Z,a-z,\\.]+")) %>% 
+  group_by(Variable) %>% 
+  summarise(Importance = mean(Overall)) %>% 
+  arrange(desc(Importance))
+# Plot
+imp %>% ggplot(aes(reorder(Variable, Importance), Importance)) +
+  geom_bar(aes(fill = Variable), stat="identity", color = "black") + 
+  ggtitle("Importance of variables") + 
+  xlab("Variable") + 
+  ylab("Average importance") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position="none")
+
+```
+RMSE for all models when using only four most important variables which stand out in above plot is in following table and it is clear that results are worse, so if training time is not important it is better to include all variables or at least more than four.
+
+\clearpage
+
+```{r table_RMSE_4variables, echo=FALSE}
+table_four_variables <- data.frame(Method = c("rf","ctree2","brnn","rpart","ppr","gamSpline","treebag","rpart2","KNN","glm","gaussprLinear","bridge","Average"),
+                                   "1" = c(5027.517,4886.040,5170.960,5055.533,5278.774,5033.445,5319.380,5678.298,6538.937,5970.804,5970.354,5969.010,10793.651),
+                                   "2" = c(4667.483,4901.064,4933.179,5096.980,4927.842,5497.219,5693.398,6182.477,5839.266,6546.222,6545.578,6544.853,11083.114),
+                                   "3" = c(3960.930,4170.918,4309.480,4200.923,4115.452,4719.981,4421.183,4888.287,5607.404,6025.592,6025.773,6025.917,11224.953),
+                                   "4" = c(4343.939,4567.309,4353.803,4554.839,4564.463,4679.778,4709.248,5030.247,5743.306,5805.526,5806.041,5806.927,11346.733),
+                                   "5" = c(3838.085,3939.628,4009.452,4130.811,4244.460,4607.509,4509.195,4763.702,5968.089,5642.619,5643.528,5645.999,10771.546),
+                                   Average = c(4367.591,4492.992,4555.375,4607.817,4626.199,4907.586,4930.481,5308.602,5939.400,5998.153,5998.255,5998.541,11043.999))
+library(knitr)
+kable(table_four_variables, caption = "RMSE for each cycle and average RMSE for all cycles for top 4 most important variables")
+```
+
+\clearpage
+
+# Results
+Best method to train model for these data seems to be Random Forrest which produces best results if compared with RMSE function.
+
+Using more models and then averaging them is not good option as this does not improve results.
+
+Final results with variables importance follow what was discovered in data analysis chapter, that Distance to Solar Noon, Humidity, Hour of the day and Sky coverage have big influence on final prediction.
+
+Final $RMSE = `r round(RMSE, 2)`$ is much better in compare to situation when only Average is used - RMSE = `r format(Results %>% filter(Method == "Average" & Cycle == 0) %>% .$RMSE, scientific = FALSE)`.
+
+Here is plot of actual values and predicted values
+```{r compare_result, echo=FALSE, message = FALSE, warning = FALSE, fig.cap = "Comparision of two months of real and predicted values.", out.width = "100%", fig.pos='H', fig.align='center'}
+library(lubridate)
+validation %>% mutate(Predicted.Power.Generation = y_hat) %>%
+  mutate(date = make_date(Year, Month, Day)) %>% 
+  filter(Year == 2009 & Month %in% c(4,5)) %>% 
+  select(date, Predicted.Power.Generation, Power.Generated) %>% 
+  gather("type","power",2:3) %>% 
+  ggplot(aes(date, power, color=factor(type))) +
+  geom_line(size = 1, alpha = 0.5) + 
+  ggtitle("Comparision of two months of real and predicted values") + 
+  xlab("Date") + 
+  ylab("Generated power") + 
+  scale_color_manual(values = c("blue", "red"),
+                     labels = c("Real power", "Predicted power"))
+
+```
+
+
+\clearpage
+
+# Conclusion
+Final prediction model seems to be performing well and prediction is close to real values.
+
+Measured data were selected well and allowed good prediction. 
+
+Number of predictors did not play big role in this case as number of observations is low so training time is not very long. If more observations should be introduced then it would be good to consider reduction of predictors to allow faster training. However this would need to be done with more research on relationships between values.
+
+More data from more years could provide better or worse predictions, that would require more research and more data.
+
+Second best method was neural network with one internal layer with $\pm 8$ neurons. This is good result and number of neurons is expected as more neurons could lead to nonconverging training of the network
+
+Best method is Random Forest, which seems to be good choice for this kind of task, however requires significantly longer time for training.
+
+It would be interesting to compare these two methods on larger set of data. It is possible that neural netowork could be better than random forest.
+
+Other models may perform well too, here is comparision of 5 best performing models on training data when run on validation data:
+
+```{r table_RMSE_best_models, echo=FALSE}
+table_top_models <- data.frame(Method = c("rpart", "rf", "ctree2", "ppr", "brnn"),
+                                   "RMSE" = c(3265.290, 2850.955, 3396.210, 3620.026, 2946.773  ))
+table_top_models <- table_top_models %>% arrange(RMSE)
+library(knitr)
+kable(table_top_models, caption = "RMSE for 5 best performing models when run on validation data.")
+```
